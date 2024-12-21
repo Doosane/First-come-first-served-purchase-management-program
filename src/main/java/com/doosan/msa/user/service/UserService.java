@@ -2,6 +2,7 @@ package com.doosan.msa.user.service;
 
 import com.doosan.msa.common.jwt.TokenProvider;
 import com.doosan.msa.common.service.MailSendService;
+import com.doosan.msa.common.util.AESUtil;
 import com.doosan.msa.user.dto.requestDTO.*;
 import com.doosan.msa.user.dto.responseDTO.*;
 import com.doosan.msa.user.entity.User;
@@ -69,16 +70,21 @@ public class UserService {
         return ResponseDTO.success(HttpStatus.OK.value(), "EMAIL_VERIFIED", "이메일 인증이 완료되었습니다.", null);
     }
 
-    // 회원가입
+
+    // 회원가입 email 필드를 저장하기 전에 암호화하도록 서비스 코드를 수정
     @Transactional
     public ResponseDTO<?> createUser(UserRequestDTO requestDTO) {
         log.info("회원가입 요청: {}", requestDTO.getEmail());
 
-        if (isPresentUser(requestDTO.getEmail()) != null) {
+        // 이메일 암호화
+        String encryptedEmail = AESUtil.encrypt(requestDTO.getEmail());
+
+        if (isPresentUser(encryptedEmail) != null) {
             log.warn("중복된 이메일: {}", requestDTO.getEmail());
             return ResponseDTO.fail(HttpStatus.CONFLICT.value(), "DUPLICATED_EMAIL", "이미 사용 중인 이메일입니다.");
         }
 
+        // 기존 로직 유지
         if (!authService.CheckAuthNum(requestDTO.getEmail(), requestDTO.getAuthNum())) {
             log.warn("이메일 인증이 필요합니다: {}", requestDTO.getEmail());
             return ResponseDTO.fail(HttpStatus.UNAUTHORIZED.value(), "EMAIL_NOT_VERIFIED", "이메일 인증이 완료되지 않았습니다.");
@@ -89,38 +95,64 @@ public class UserService {
             return ResponseDTO.fail(HttpStatus.BAD_REQUEST.value(), "PASSWORD_MISMATCH", "비밀번호가 일치하지 않습니다.");
         }
 
-        User user = User.builder()
-                .name(requestDTO.getName())
-                .password(passwordEncoder.encode(requestDTO.getPassword()))
-                .email(requestDTO.getEmail())
-                .phone(requestDTO.getPhone())
-                .address(requestDTO.getAddress())
-                .build();
+        try {
+            // 다른 필드 암호화
+            String encryptedName = AESUtil.encrypt(requestDTO.getName());
+            String encryptedPhone = AESUtil.encrypt(requestDTO.getPhone());
+            String encryptedAddress = AESUtil.encrypt(requestDTO.getAddress());
 
-        userRepository.save(user);
-        userRepository.flush();
-        log.info("회원가입 성공: {}", requestDTO.getEmail());
+            // 암호화된 데이터를 저장
+            User user = User.builder()
+                    .name(encryptedName)
+                    .password(passwordEncoder.encode(requestDTO.getPassword()))
+                    .email(encryptedEmail)
+                    .phone(encryptedPhone)
+                    .address(encryptedAddress)
+                    .build();
 
-        return ResponseDTO.success(
-                HttpStatus.CREATED.value(),
-                "USER_CREATED",
-                "회원가입이 완료되었습니다.",
-                UserResponseDTO.builder()
-                        .id(user.getId())
-                        .name(user.getName())
-                        .email(user.getEmail())
-                        .phone(user.getPhone())
-                        .address(user.getAddress())
-                        .createdAt(user.getCreatedAt())
-                        .modifiedAt(user.getModifiedAt())
-                        .build()
-        );
+            userRepository.save(user);
+            userRepository.flush();
+            log.info("회원가입 성공: {}", requestDTO.getEmail());
+
+            return ResponseDTO.success(
+                    HttpStatus.CREATED.value(),
+                    "USER_CREATED",
+                    "회원가입이 완료되었습니다.",
+                    UserResponseDTO.builder()
+                            .id(user.getId())
+                            .name(requestDTO.getName())
+                            .email(requestDTO.getEmail())
+                            .phone(requestDTO.getPhone())
+                            .address(requestDTO.getAddress())
+                            .createdAt(user.getCreatedAt())
+                            .modifiedAt(user.getModifiedAt())
+                            .build()
+            );
+        } catch (Exception e) {
+            log.error("회원가입 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseDTO.fail(HttpStatus.INTERNAL_SERVER_ERROR.value(), "ENCRYPTION_ERROR", "회원 정보 저장 중 오류가 발생했습니다.");
+        }
     }
 
+
+    // 민감 데이터 마스킹 처리 유틸 메서드
+    private String maskSensitiveData(String data) {
+        if (data == null || data.length() <= 4) {
+            return "****"; // 데이터가 짧을 경우 전부 마스킹
+        }
+        return data.substring(0, 2) + "****" + data.substring(data.length() - 2); // 앞 2자리와 뒤 2자리만 남김
+    }
+
+
+
     // 유저 존재 여부 확인
+    // 암호화된 이메일은 검색 시 복호화해야 하므로, 데이터베이스 검색 시 복호화하거나 암호화된 상태로 비교해야 한다
     private User isPresentUser(String email) {
         log.debug("유저 이메일 확인: {}", email);
-        Optional<User> optionalUser = userRepository.findByEmail(email);
+
+        // 입력된 이메일을 암호화하여 비교
+        String encryptedEmail = AESUtil.encrypt(email);
+        Optional<User> optionalUser = userRepository.findByEmail(encryptedEmail);
         return optionalUser.orElse(null);
     }
 
