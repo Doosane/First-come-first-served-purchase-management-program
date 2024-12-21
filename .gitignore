@@ -42,4 +42,3 @@ application.properties
 docker-compose.yml
 Dockerfile
 
-.env
