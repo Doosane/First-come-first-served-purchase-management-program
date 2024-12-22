@@ -1,5 +1,5 @@
 package com.doosan.msa.exam.service;
-
+import com.doosan.msa.common.jwt.TokenProvider;
 import com.doosan.msa.exam.dto.requestDTO.ExamSessionRequestDTO;
 import com.doosan.msa.exam.dto.responseDTO.ExamSessionResponseDTO;
 import com.doosan.msa.exam.entity.Status;
@@ -9,8 +9,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
+import com.doosan.msa.common.exception.TokenInvalidException;
+import javax.servlet.http.HttpServletRequest;
 
 /**
  * ExamSessionService 클래스
@@ -23,10 +27,11 @@ import java.util.stream.Collectors;
 public class ExamSessionService {
 
     private final ExamSessionRepository examSessionRepository;
+    private final TokenProvider tokenProvider; // 주입 추가
 
+    // 모든 시험 세션 조회
     @Transactional
     public List<ExamSessionResponseDTO> getAllSessions() {
-        log.info("모든 시험 세션 조회");
         List<ExamSession> sessions = examSessionRepository.findAllWithStatus(); // n+1 문제 해결 JPQL로 변경 join fetch를 활용한 데이터 로딩 적용
 
         // Lazy 컬렉션 명시적 초기화
@@ -38,7 +43,8 @@ public class ExamSessionService {
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true) // 서비스 계층에서 트랜잭션을 확장하여 Lazy Loading 문제가 발생하지 않도록 보장
+    // 특정 시험 세션 조회
+    @Transactional(readOnly = true)
     public ExamSessionResponseDTO getSessionById(Long sessionId) {
         log.info("시험 세션 ID: {} 조회 요청", sessionId);
         ExamSession session = examSessionRepository.findByIdWithStatus(sessionId)
@@ -50,26 +56,49 @@ public class ExamSessionService {
         return toResponseDto(session);
     }
 
-    public Long createSession(ExamSessionRequestDTO request) {
-        log.info("새로운 시험 세션 생성 요청: {}", request);
-        ExamSession session = new ExamSession();
-        session.setCategory(request.getCategory());
-        session.setName(request.getName());
-        session.setOnline(request.isOnline());
-        session.setSub(request.isSub()); // boolean 값을 그대로 설정
+    // 세션 생성
+    @Transactional
+    public Map<String, Object> createSession(HttpServletRequest request, ExamSessionRequestDTO sessionRequestDTO) {
+        // 토큰 유효성 검사
+        String authorizationHeader = request.getHeader("Authorization");
+        if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
+            throw new TokenInvalidException("유효하지 않은 Authorization 헤더 형식입니다.");
+        }
 
-        for (ExamSessionRequestDTO.StatusDTO statusDto : request.getStatus()) {
-            log.debug("세션 상태 추가: {}", statusDto);
+        // "Bearer " 접두사를 제거하여 순수한 JWT 토큰 추출
+        String token = authorizationHeader.substring(7);
+
+        // 토큰 유효성 검증
+        if (!tokenProvider.validateToken(token)) {
+            throw new TokenInvalidException("유효하지 않은 토큰입니다.");
+        }
+
+        // 새로운 ExamSession 생성
+        ExamSession session = new ExamSession();
+        session.setCategory(sessionRequestDTO.getCategory());
+        session.setName(sessionRequestDTO.getName());
+        session.setOnline(sessionRequestDTO.isOnline());
+        session.setSub(sessionRequestDTO.isSub());
+
+        for (ExamSessionRequestDTO.StatusDTO statusDto : sessionRequestDTO.getStatus()) {
             Status status = new Status();
             status.setCode(statusDto.getCode());
             status.setValue(statusDto.getValue());
             status.setExamSession(session);
             session.getStatus().add(status);
         }
-
         ExamSession savedSession = examSessionRepository.save(session);
         log.info("시험 세션 생성 완료. ID: {}", savedSession.getId());
-        return savedSession.getId();
+
+        // 반환할 데이터 생성
+        return Map.of(
+                "id", savedSession.getId(),
+                "name", savedSession.getName(),
+                "category", savedSession.getCategory(),
+                "online", savedSession.getOnline(),
+                "sub", savedSession.isSub(),
+                "createdAt", LocalDateTime.now()
+        );
     }
 
     private ExamSessionResponseDTO toResponseDto(ExamSession session) {
@@ -86,35 +115,71 @@ public class ExamSessionService {
         );
     }
 
+    // 특정 세션 삭제 api
     @Transactional
-    public void deleteSessionById(Long sessionId) {
+    public void deleteSessionById(HttpServletRequest request, Long sessionId) {
+
+        // Authorization 헤더에서 토큰 추출
+        String authorizationHeader = request.getHeader("Authorization");
+        if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
+            throw new TokenInvalidException("유효하지 않은 Authorization 헤더 형식입니다.");
+        }
+
+        // "Bearer " 접두사를 제거하여 순수한 JWT 토큰 추출
+        String token = authorizationHeader.substring(7);
+
+        // 토큰 유효성 검증
+        if (!tokenProvider.validateToken(token)) {
+            throw new TokenInvalidException("유효하지 않은 토큰입니다.");
+        }
+
+        // 세션 삭제
         examSessionRepository.deleteById(sessionId);
         log.info("ID가 {}인 세션이 삭제되었습니다.", sessionId);
     }
 
 
+    // 특정 세션 수정
     @Transactional
-    public void updateSession(Long sessionId, ExamSessionRequestDTO request) {
+    public Map<String, Object> updateSession(HttpServletRequest request, Long sessionId, ExamSessionRequestDTO sessionRequestDTO) {
+        // 토큰 검증
+        String authorizationHeader = request.getHeader("Authorization");
+        if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
+            throw new TokenInvalidException("유효하지 않은 Authorization 헤더 형식입니다.");
+        }
+        String token = authorizationHeader.substring(7);
+        if (!tokenProvider.validateToken(token)) {
+            throw new TokenInvalidException("유효하지 않은 토큰입니다.");
+        }
+
+        // 세션 조회 및 업데이트
         ExamSession session = examSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("세션을 찾을 수 없습니다: ID " + sessionId));
+        session.setCategory(sessionRequestDTO.getCategory());
+        session.setName(sessionRequestDTO.getName());
+        session.setOnline(sessionRequestDTO.isOnline());
+        session.setSub(sessionRequestDTO.isSub());
 
-        session.setCategory(request.getCategory());
-        session.setName(request.getName());
-        session.setOnline(request.isOnline());
-        session.setSub(request.isSub());
-
-        // 상태 업데이트 로직 (필요한 경우 추가)
+        // 상태 업데이트 로직
         session.getStatus().clear();
-        for (ExamSessionRequestDTO.StatusDTO statusDto : request.getStatus()) {
+        for (ExamSessionRequestDTO.StatusDTO statusDto : sessionRequestDTO.getStatus()) {
             Status status = new Status();
             status.setCode(statusDto.getCode());
             status.setValue(statusDto.getValue());
             status.setExamSession(session);
             session.getStatus().add(status);
         }
-
         examSessionRepository.save(session);
         log.info("ID가 {}인 세션이 수정되었습니다.", sessionId);
-    }
 
+        // 반환할 데이터 구성
+        return Map.of(
+                "id", sessionId,
+                "name", sessionRequestDTO.getName(),
+                "category", sessionRequestDTO.getCategory(),
+                "online", sessionRequestDTO.isOnline(),
+                "sub", sessionRequestDTO.isSub(),
+                "updatedAt", LocalDateTime.now()
+        );
+    }
 }
