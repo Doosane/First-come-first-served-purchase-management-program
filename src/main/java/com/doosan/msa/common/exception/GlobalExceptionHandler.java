@@ -12,6 +12,36 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /**
+     * RuntimeException 처리
+     */
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<ResponseDTO<Void>> handleRuntimeException(RuntimeException ex) {
+        log.error("RuntimeException 발생: {}", ex.getMessage(), ex);
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ResponseDTO.fail(
+                        HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                        "INTERNAL_SERVER_ERROR",
+                        ex.getMessage() != null ? ex.getMessage() : "서버 내부 오류가 발생했습니다."
+                ));
+    }
+
+    /**
+     * Token 관련 예외 처리
+     */
+    @ExceptionHandler(TokenInvalidException.class)
+    public ResponseEntity<ResponseDTO<Void>> handleTokenInvalidException(TokenInvalidException ex) {
+        log.error("TokenInvalidException 발생: {}", ex.getMessage(), ex);
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ResponseDTO.fail(
+                        HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                        "TOKEN_INVALID",
+                        ex.getMessage() != null ? ex.getMessage() : "잘못된 토큰입니다."
+                ));
+    }
+
     // NullPointerException 처리
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     @ExceptionHandler(NullPointerException.class)

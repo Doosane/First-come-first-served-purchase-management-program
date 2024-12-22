@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -88,7 +89,9 @@ public class SecurityConfiguration {
         log.info("URL별 접근 권한 설정 시작");
         http.authorizeRequests()
                 .antMatchers("/v1/users/**").permitAll()
+                .antMatchers("/v1/api/**").permitAll()
                 .antMatchers("/v1/auth/**").permitAll()
+                .antMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll() // Swagger 경로 허용
                 .antMatchers("/v1/mailauthCheck/**").permitAll()
                 .antMatchers("/v1/auth/mailSend").permitAll()
                 .antMatchers("/v1/auth/email/verify").permitAll()
