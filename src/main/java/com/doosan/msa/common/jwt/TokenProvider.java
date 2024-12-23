@@ -1,27 +1,26 @@
 package com.doosan.msa.common.jwt;
 
+import com.doosan.msa.common.exception.TokenInvalidException;
+import com.doosan.msa.common.util.AESUtil;
 import com.doosan.msa.user.entity.User;
 import com.doosan.msa.user.entity.RefreshToken;
-import com.doosan.msa.user.entity.UserDetailsImpl;
 import com.doosan.msa.user.dto.requestDTO.TokenDTO;
 import com.doosan.msa.user.dto.responseDTO.ResponseDTO;
 import com.doosan.msa.user.repository.RefreshTokenRepository;
 import com.doosan.msa.common.shared.Authority;
+import com.doosan.msa.user.repository.UserRepository;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.persistence.EntityNotFoundException;
 import java.security.Key;
 import java.util.Date;
-import java.util.Optional;
 
 @Slf4j
 @Component
@@ -34,10 +33,12 @@ public class TokenProvider {
 
     private final Key key; // 암호화에 사용할 키
     private final RefreshTokenRepository refreshTokenRepository; // 리프레시 토큰 저장소
+    private final UserRepository userRepository; // 사용자 저장소
 
     // TokenProvider 초기화
-    public TokenProvider(@Value("${jwt.secret}") String secretKey, RefreshTokenRepository refreshTokenRepository) {
+    public TokenProvider(@Value("${jwt.secret}") String secretKey, RefreshTokenRepository refreshTokenRepository, UserRepository userRepository) {
         this.refreshTokenRepository = refreshTokenRepository;
+        this.userRepository = userRepository;
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         this.key = Keys.hmacShaKeyFor(keyBytes);
         log.debug("TokenProvider가 초기화되었습니다.");
@@ -47,15 +48,15 @@ public class TokenProvider {
      * JWT 토큰 생성
      */
     public TokenDTO generateTokenDTO(User user) {
-        log.info("JWT 토큰 생성 시작: 사용자 이메일 - {}", user.getEmail());
+        log.info("JWT 토큰 생성 시작: 사용자 이메일 - {}, 권한 - {}", user.getEmail(), user.getAuthority());
 
         long now = (new Date().getTime());
 
         // Access Token 생성
         Date accessTokenExpiresIn = new Date(now + ACCESS_TOKEN_EXPIRE_TIME);
         String accessToken = Jwts.builder()
-                .setSubject(user.getName()) // 토큰에 사용자 이름 설정
-                .claim(AUTHORITIES_KEY, Authority.ROLE_USER.name()) // 권한 설정
+                .setSubject(AESUtil.decrypt(user.getEmail())) // 복호화된 이메일 사용
+                .claim(AUTHORITIES_KEY, user.getAuthority().name()) // 사용자 권한 설정
                 .setExpiration(accessTokenExpiresIn) // 만료 시간 설정
                 .signWith(key, SignatureAlgorithm.HS256) // 서명 알고리즘과 키 설정
                 .compact();
@@ -77,7 +78,6 @@ public class TokenProvider {
                 .value(refreshToken)
                 .build();
         refreshTokenRepository.save(refreshTokenObject);
-        log.info("리프레시 토큰이 저장되었습니다: 사용자 이메일 - {}", user.getEmail());
 
         return TokenDTO.builder()
                 .grantType(BEARER_PREFIX)
@@ -87,17 +87,37 @@ public class TokenProvider {
                 .build();
     }
 
+    /***
+     * 수정된 TokenProvider 클래스에 getUserIdFromToken 추가
+     * @param token
+     * @return userId
+     */
+    public String getUserIdFromToken(String token) {
+        try {
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
+
+            // 토큰의 subject에서 사용자 ID 추출
+            String userId = claims.getSubject();
+            log.info("토큰에서 추출된 사용자 ID: {}", userId);
+            return userId;
+        } catch (JwtException e) {
+            log.error("토큰 파싱 중 오류 발생: {}", e.getMessage());
+            throw new TokenInvalidException("유효하지 않은 토큰입니다.");
+        }
+    }
+
     /**
      * 인증 객체로부터 사용자 정보 가져오기
      */
     public User getUserFromAuthentication(String refreshToken) {
-        // RefreshToken을 통해 User 객체를 찾습니다.
         return refreshTokenRepository.findByValue(refreshToken)
                 .map(RefreshToken::getUser)
                 .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 Refresh Token입니다."));
     }
-
-
 
     /**
      * JWT 유효성 검증
@@ -130,43 +150,20 @@ public class TokenProvider {
     public RefreshToken isPresentRefreshToken(User user) {
         log.info("리프레시 토큰 조회 시작: 사용자 이메일 - {}", user.getEmail());
 
-        RefreshToken refreshToken = refreshTokenRepository.findByUser(user).orElse(null);
-        if (refreshToken == null) {
-            log.warn("리프레시 토큰이 존재하지 않습니다: 사용자 이메일 - {}", user.getEmail());
-        } else {
-            log.debug("리프레시 토큰 조회 성공: 사용자 이메일 - {}, 토큰 값 - {}", user.getEmail(), refreshToken.getValue());
-        }
-
-        return refreshToken;
+        return refreshTokenRepository.findByUser(user).orElse(null);
     }
 
     /**
-     * Refresh Token 삭제
+     * 권한 검증 메서드
      */
-    @Transactional
-    public ResponseDTO<?> deleteRefreshToken(User user) {
-        try {
-            // Refresh Token 삭제 로직
-            refreshTokenRepository.deleteByUserId(user.getId());
-            log.info("Token 삭제 완료 - User ID: {}", user.getId());
+    public void validateUserRole(String token, Authority requiredAuthority) {
+        Claims claims = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
+        String userRole = claims.get(AUTHORITIES_KEY, String.class);
 
-            // 성공 응답 반환
-            return ResponseDTO.success(
-                    HttpStatus.OK.value(),
-                    "TOKEN_DELETION_SUCCESS",
-                    "Token 삭제 완료",
-                    null
-            );
-        } catch (Exception e) {
-            log.error("Token 삭제 중 오류 발생: {}", e.getMessage(), e);
-            return ResponseDTO.fail(
-                    HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                    "TOKEN_DELETION_ERROR",
-                    "Token 삭제 중 오류가 발생했습니다."
-            );
+        if (!userRole.equals(requiredAuthority.name())) {
+            throw new TokenInvalidException("권한이 부족합니다. 요구된 권한: " + requiredAuthority.name());
         }
+
+        log.info("권한 검증 성공: {}", userRole);
     }
-
-
-
 }

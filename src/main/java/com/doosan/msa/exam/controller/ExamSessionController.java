@@ -29,6 +29,7 @@ public class ExamSessionController {
 
     private final ExamSessionService examSessionService;
 
+    // 모든 시험 세션 조회
     @GetMapping("/sessions")
     public ResponseEntity<ResponseDTO<List<ExamSessionResponseDTO>>> getAllSessions() {
         logger.info("모든 세션 정보를 조회하는 요청을 받았습니다.");
@@ -39,6 +40,7 @@ public class ExamSessionController {
         );
     }
 
+    // 특정 시험 세션 단건 조회
     @GetMapping("/sessions/{sessionId}")
     public ResponseEntity<ResponseDTO<ExamSessionResponseDTO>> getSession(@PathVariable Long sessionId) {
         try {
@@ -55,6 +57,7 @@ public class ExamSessionController {
         }
     }
 
+    // 강사의 세션 등록용
     @PostMapping("/sessions")
     public ResponseEntity<ResponseDTO<Map<String, Object>>> createSession(
             HttpServletRequest request,

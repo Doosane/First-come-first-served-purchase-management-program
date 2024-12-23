@@ -1,5 +1,6 @@
 package com.doosan.msa.user.entity;
 
+import com.doosan.msa.common.shared.Authority;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import javax.persistence.*;
 import javax.validation.constraints.Size;
 import java.io.Serializable;
+import java.time.LocalDateTime;
 import java.util.Objects;
 
 /**
@@ -32,6 +34,13 @@ public class User extends Timestamped implements Serializable {
     @Column(unique = true) // 유니크 제약 조건: 중복된 이름 허용 안함
     private String name;
 
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
+    @Column(name = "modified_at")
+    private LocalDateTime modifiedAt;
+
+
     @Column(unique = true) // 유니크 제약 조건: 중복된 이메일 허용 안함
     private String email;
 
@@ -45,10 +54,18 @@ public class User extends Timestamped implements Serializable {
     @Column(nullable = false) // 비밀번호는 null 값을 허용하지 않음
     private String password;
 
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING) // Authority Enum 값을 문자열로 저장
+    private Authority authority;
+
+    // 추가 메서드
+    public Authority getAuthority() {
+        return this.authority;
+    }
+
     @JsonIgnore
     @Builder.Default
     private boolean isDeleted = false;
-
 
     /**
      * 사용자 객체 생성자 (추가 생성자)

@@ -90,6 +90,8 @@ public class SecurityConfiguration {
         http.authorizeRequests()
                 .antMatchers("/v1/users/**").permitAll()
                 .antMatchers("/v1/api/**").permitAll()
+                .antMatchers("/v1/api/orders/**").permitAll()
+                .antMatchers("/error").permitAll()
                 .antMatchers("/v1/auth/**").permitAll()
                 .antMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll() // Swagger 경로 허용
                 .antMatchers("/v1/mailauthCheck/**").permitAll()

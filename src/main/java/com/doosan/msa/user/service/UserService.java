@@ -2,6 +2,7 @@ package com.doosan.msa.user.service;
 
 import com.doosan.msa.common.jwt.TokenProvider;
 import com.doosan.msa.common.service.MailSendService;
+import com.doosan.msa.common.shared.Authority;
 import com.doosan.msa.common.util.AESUtil;
 import com.doosan.msa.user.dto.requestDTO.*;
 import com.doosan.msa.user.dto.responseDTO.*;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -74,45 +76,55 @@ public class UserService {
     // 회원가입 email 필드를 저장하기 전에 암호화하도록 서비스 코드를 수정
     @Transactional
     public ResponseDTO<?> createUser(UserRequestDTO requestDTO) {
-        log.info("회원가입 요청: {}", requestDTO.getEmail());
+        log.info("회원가입 요청: {}", maskSensitiveData(requestDTO.getEmail()));
 
-        // 이메일 암호화
-        String encryptedEmail = AESUtil.encrypt(requestDTO.getEmail());
+        // 이메일이 특정 값인 경우 강사 권한 부여
+        Authority authority = "doosan0425@gmail.com".equals(requestDTO.getEmail())
+                ? Authority.ROLE_INSTRUCTOR
+                : Authority.ROLE_USER;
 
-        if (isPresentUser(encryptedEmail) != null) {
-            log.warn("중복된 이메일: {}", requestDTO.getEmail());
-            return ResponseDTO.fail(HttpStatus.CONFLICT.value(), "DUPLICATED_EMAIL", "이미 사용 중인 이메일입니다.");
-        }
+        log.debug("회원가입 요청 이메일: {}", requestDTO.getEmail());
+        log.info("결정된 권한: {}", authority);
 
-        // 기존 로직 유지
-        if (!authService.CheckAuthNum(requestDTO.getEmail(), requestDTO.getAuthNum())) {
-            log.warn("이메일 인증이 필요합니다: {}", requestDTO.getEmail());
-            return ResponseDTO.fail(HttpStatus.UNAUTHORIZED.value(), "EMAIL_NOT_VERIFIED", "이메일 인증이 완료되지 않았습니다.");
-        }
-
-        if (!requestDTO.getPassword().equals(requestDTO.getPasswordConfirm())) {
-            log.warn("비밀번호 불일치: {}", requestDTO.getEmail());
-            return ResponseDTO.fail(HttpStatus.BAD_REQUEST.value(), "PASSWORD_MISMATCH", "비밀번호가 일치하지 않습니다.");
-        }
+//        Authority authority = requestDTO.getEmail().endsWith("@instructor.com")
+//                ? Authority.ROLE_INSTRUCTOR
+//                : Authority.ROLE_USER;
+//        log.info("결정된 권한: {}", authority);
 
         try {
-            // 다른 필드 암호화
+            String encryptedEmail = AESUtil.encrypt(requestDTO.getEmail());
+
+            if (isPresentUser(encryptedEmail) != null) {
+                log.warn("중복된 이메일: {}", maskSensitiveData(requestDTO.getEmail()));
+                return ResponseDTO.fail(HttpStatus.CONFLICT.value(), "DUPLICATED_EMAIL", "이미 사용 중인 이메일입니다.");
+            }
+
+            if (!authService.CheckAuthNum(requestDTO.getEmail(), requestDTO.getAuthNum())) {
+                log.warn("이메일 인증이 필요합니다: {}", maskSensitiveData(requestDTO.getEmail()));
+                return ResponseDTO.fail(HttpStatus.UNAUTHORIZED.value(), "EMAIL_NOT_VERIFIED", "이메일 인증이 완료되지 않았습니다.");
+            }
+
+            if (!requestDTO.getPassword().trim().equals(requestDTO.getPasswordConfirm().trim())) {
+                log.warn("비밀번호 불일치: {}", maskSensitiveData(requestDTO.getEmail()));
+                return ResponseDTO.fail(HttpStatus.BAD_REQUEST.value(), "PASSWORD_MISMATCH", "비밀번호가 일치하지 않습니다.");
+            }
+
             String encryptedName = AESUtil.encrypt(requestDTO.getName());
             String encryptedPhone = AESUtil.encrypt(requestDTO.getPhone());
             String encryptedAddress = AESUtil.encrypt(requestDTO.getAddress());
 
-            // 암호화된 데이터를 저장
             User user = User.builder()
                     .name(encryptedName)
                     .password(passwordEncoder.encode(requestDTO.getPassword()))
                     .email(encryptedEmail)
                     .phone(encryptedPhone)
                     .address(encryptedAddress)
+                    .authority(authority)
                     .build();
 
             userRepository.save(user);
-            userRepository.flush();
-            log.info("회원가입 성공: {}", requestDTO.getEmail());
+
+            log.info("회원가입 성공: {}", maskSensitiveData(requestDTO.getEmail()));
 
             return ResponseDTO.success(
                     HttpStatus.CREATED.value(),
@@ -120,10 +132,11 @@ public class UserService {
                     "회원가입이 완료되었습니다.",
                     UserResponseDTO.builder()
                             .id(user.getId())
-                            .name(requestDTO.getName())
-                            .email(requestDTO.getEmail())
-                            .phone(requestDTO.getPhone())
-                            .address(requestDTO.getAddress())
+                            .name(AESUtil.decrypt(user.getName()))
+                            .email(AESUtil.decrypt(user.getEmail()))
+                            .phone(AESUtil.decrypt(user.getPhone()))
+                            .address(AESUtil.decrypt(user.getAddress()))
+                            .authority(user.getAuthority())
                             .createdAt(user.getCreatedAt())
                             .modifiedAt(user.getModifiedAt())
                             .build()
@@ -133,6 +146,7 @@ public class UserService {
             return ResponseDTO.fail(HttpStatus.INTERNAL_SERVER_ERROR.value(), "ENCRYPTION_ERROR", "회원 정보 저장 중 오류가 발생했습니다.");
         }
     }
+
 
 
     // 민감 데이터 마스킹 처리 유틸 메서드
@@ -186,6 +200,7 @@ public class UserService {
                         .email(user.getEmail())
                         .phone(user.getPhone())
                         .address(user.getAddress())
+                        .authority(user.getAuthority()) // authority 추가
                         .createdAt(user.getCreatedAt())
                         .modifiedAt(user.getModifiedAt())
                         .build()
@@ -198,18 +213,42 @@ public class UserService {
         log.info("로그아웃 요청");
 
         String refreshToken = request.getHeader("Refresh_Token");
+        if (refreshToken == null || refreshToken.isEmpty()) {
+            log.warn("리프레시 토큰이 없습니다.");
+            return ResponseDTO.fail(HttpStatus.BAD_REQUEST.value(), "TOKEN_MISSING", "리프레시 토큰이 제공되지 않았습니다.");
+        }
+
         if (!tokenProvider.validateToken(refreshToken)) {
             log.warn("유효하지 않은 리프레시 토큰: {}", refreshToken);
             return ResponseDTO.fail(HttpStatus.UNAUTHORIZED.value(), "INVALID_TOKEN", "유효하지 않은 토큰입니다.");
         }
 
         User user = tokenProvider.getUserFromAuthentication(refreshToken);
-        log.debug("로그아웃 대상 사용자: {}", user.getEmail());
+        if (user == null) {
+            log.warn("리프레시 토큰에 해당하는 사용자를 찾을 수 없습니다: {}", refreshToken);
+            return ResponseDTO.fail(HttpStatus.UNAUTHORIZED.value(), "USER_NOT_FOUND", "해당 리프레시 토큰에 대한 사용자를 찾을 수 없습니다.");
+        }
 
-        refreshTokenRepository.deleteByUserId(user.getId());
-        log.info("로그아웃 성공");
-        return ResponseDTO.success(HttpStatus.OK.value(), "LOGOUT_SUCCESS", "로그아웃이 완료되었습니다.", null);
+        log.debug("로그아웃 대상 사용자: ID - {}, 권한 - {}", user.getId(), user.getAuthority());
+
+        try {
+            refreshTokenRepository.deleteByUserId(user.getId());
+            log.info("사용자의 리프레시 토큰 삭제 성공: {}", user.getId());
+        } catch (Exception e) {
+            log.error("리프레시 토큰 삭제 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseDTO.fail(HttpStatus.INTERNAL_SERVER_ERROR.value(), "TOKEN_DELETE_FAILED", "리프레시 토큰 삭제에 실패했습니다.");
+        }
+
+        log.info("로그아웃 성공: 사용자 ID - {}", user.getId());
+        return ResponseDTO.success(
+                HttpStatus.OK.value(),
+                "LOGOUT_SUCCESS",
+                "로그아웃이 완료되었습니다.",
+                Map.of("userId", user.getId(), "authority", user.getAuthority())
+        );
     }
+
+
 
 
     // 헤더에 토큰 추가
