@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -212,18 +213,42 @@ public class UserService {
         log.info("로그아웃 요청");
 
         String refreshToken = request.getHeader("Refresh_Token");
+        if (refreshToken == null || refreshToken.isEmpty()) {
+            log.warn("리프레시 토큰이 없습니다.");
+            return ResponseDTO.fail(HttpStatus.BAD_REQUEST.value(), "TOKEN_MISSING", "리프레시 토큰이 제공되지 않았습니다.");
+        }
+
         if (!tokenProvider.validateToken(refreshToken)) {
             log.warn("유효하지 않은 리프레시 토큰: {}", refreshToken);
             return ResponseDTO.fail(HttpStatus.UNAUTHORIZED.value(), "INVALID_TOKEN", "유효하지 않은 토큰입니다.");
         }
 
         User user = tokenProvider.getUserFromAuthentication(refreshToken);
-        log.debug("로그아웃 대상 사용자: {}", user.getEmail());
+        if (user == null) {
+            log.warn("리프레시 토큰에 해당하는 사용자를 찾을 수 없습니다: {}", refreshToken);
+            return ResponseDTO.fail(HttpStatus.UNAUTHORIZED.value(), "USER_NOT_FOUND", "해당 리프레시 토큰에 대한 사용자를 찾을 수 없습니다.");
+        }
 
-        refreshTokenRepository.deleteByUserId(user.getId());
-        log.info("로그아웃 성공");
-        return ResponseDTO.success(HttpStatus.OK.value(), "LOGOUT_SUCCESS", "로그아웃이 완료되었습니다.", null);
+        log.debug("로그아웃 대상 사용자: ID - {}, 권한 - {}", user.getId(), user.getAuthority());
+
+        try {
+            refreshTokenRepository.deleteByUserId(user.getId());
+            log.info("사용자의 리프레시 토큰 삭제 성공: {}", user.getId());
+        } catch (Exception e) {
+            log.error("리프레시 토큰 삭제 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseDTO.fail(HttpStatus.INTERNAL_SERVER_ERROR.value(), "TOKEN_DELETE_FAILED", "리프레시 토큰 삭제에 실패했습니다.");
+        }
+
+        log.info("로그아웃 성공: 사용자 ID - {}", user.getId());
+        return ResponseDTO.success(
+                HttpStatus.OK.value(),
+                "LOGOUT_SUCCESS",
+                "로그아웃이 완료되었습니다.",
+                Map.of("userId", user.getId(), "authority", user.getAuthority())
+        );
     }
+
+
 
 
     // 헤더에 토큰 추가

@@ -1,6 +1,7 @@
 package com.doosan.msa.common.jwt;
 
 import com.doosan.msa.common.exception.TokenInvalidException;
+import com.doosan.msa.common.util.AESUtil;
 import com.doosan.msa.user.entity.User;
 import com.doosan.msa.user.entity.RefreshToken;
 import com.doosan.msa.user.dto.requestDTO.TokenDTO;
@@ -54,7 +55,7 @@ public class TokenProvider {
         // Access Token 생성
         Date accessTokenExpiresIn = new Date(now + ACCESS_TOKEN_EXPIRE_TIME);
         String accessToken = Jwts.builder()
-                .setSubject(user.getEmail()) // 토큰에 사용자 이메일 설정
+                .setSubject(AESUtil.decrypt(user.getEmail())) // 복호화된 이메일 사용
                 .claim(AUTHORITIES_KEY, user.getAuthority().name()) // 사용자 권한 설정
                 .setExpiration(accessTokenExpiresIn) // 만료 시간 설정
                 .signWith(key, SignatureAlgorithm.HS256) // 서명 알고리즘과 키 설정

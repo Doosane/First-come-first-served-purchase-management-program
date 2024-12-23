@@ -1,5 +1,7 @@
 package com.doosan.msa.user.service;
 
+import com.doosan.msa.common.util.AESUtil;
+import com.doosan.msa.user.entity.User;
 import com.doosan.msa.user.entity.UserDetailsImpl;
 import com.doosan.msa.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,25 +22,18 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
     // 사용자 데이터베이스 접근을 위한 UserRepository
     private final UserRepository userRepository;
-    /**
-     * 사용자의 이름(name)을 기반으로 사용자 세부 정보를 로드
-     * @param name 사용자 이름
-     * @return UserDetails 사용자의 인증 정보를 반환
-     * @throws UsernameNotFoundException 사용자를 찾을 수 없는 경우 예외 발생
-     */
-    @Override
-    public UserDetails loadUserByUsername(String name) {
-        log.info("loadUserByUsername 호출됨: 사용자 이름 - {}", name);
 
-        // 사용자 이름으로 데이터베이스에서 사용자 조회
-        return userRepository.findByName(name)
-                .map(user -> {
-                    log.info("사용자 조회 성공: {}", user.getName());
-                    return new UserDetailsImpl(user); // UserDetailsImpl로 변환
-                })
-                .orElseThrow(() -> {
-                    log.warn("사용자를 찾을 수 없습니다: {}", name);
-                    return new UsernameNotFoundException("사용자를 찾을 수 없습니다: " + name);
-                });
+    @Override
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        log.debug("평문 이메일: {}", email);
+        // 이메일 복호화 후 검색
+        String encryptedEmail = AESUtil.encrypt(email); // 이메일 암호화
+        log.debug("암호화된 이메일: {}", encryptedEmail);
+        User user = userRepository.findByEmail(encryptedEmail)
+                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다: " + email));
+        log.debug("데이터베이스 조회 결과: {}", user != null ? "존재함" : "존재하지 않음");
+
+        return new UserDetailsImpl(user);
     }
+
 }
