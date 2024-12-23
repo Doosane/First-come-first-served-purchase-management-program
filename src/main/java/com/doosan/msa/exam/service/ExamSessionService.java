@@ -1,10 +1,14 @@
 package com.doosan.msa.exam.service;
 import com.doosan.msa.common.jwt.TokenProvider;
+import com.doosan.msa.common.shared.Authority;
+import com.doosan.msa.common.util.AESUtil;
 import com.doosan.msa.exam.dto.requestDTO.ExamSessionRequestDTO;
 import com.doosan.msa.exam.dto.responseDTO.ExamSessionResponseDTO;
 import com.doosan.msa.exam.entity.Status;
 import com.doosan.msa.exam.entity.ExamSession;
 import com.doosan.msa.exam.repository.ExamSessionRepository;
+import com.doosan.msa.user.entity.User;
+import com.doosan.msa.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,6 +32,7 @@ public class ExamSessionService {
 
     private final ExamSessionRepository examSessionRepository;
     private final TokenProvider tokenProvider; // 주입 추가
+    private final UserRepository userRepository; // UserRepository 필드 추가
 
     // 모든 시험 세션 조회
     @Transactional
@@ -59,21 +64,29 @@ public class ExamSessionService {
     // 세션 생성
     @Transactional
     public Map<String, Object> createSession(HttpServletRequest request, ExamSessionRequestDTO sessionRequestDTO) {
-        // 토큰 유효성 검사
         String authorizationHeader = request.getHeader("Authorization");
         if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
             throw new TokenInvalidException("유효하지 않은 Authorization 헤더 형식입니다.");
         }
 
-        // "Bearer " 접두사를 제거하여 순수한 JWT 토큰 추출
         String token = authorizationHeader.substring(7);
-
-        // 토큰 유효성 검증
         if (!tokenProvider.validateToken(token)) {
             throw new TokenInvalidException("유효하지 않은 토큰입니다.");
         }
 
-        // 새로운 ExamSession 생성
+        // JWT에서 이메일 추출 및 암호화
+        String email = tokenProvider.getUserIdFromToken(token);
+        String encryptedEmail = AESUtil.encrypt(email);
+
+        // 사용자 조회
+        User user = userRepository.findByEmail(encryptedEmail)
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
+
+        // 권한 확인
+        if (!user.getAuthority().equals(Authority.ROLE_INSTRUCTOR)) {
+            throw new TokenInvalidException("세션을 생성할 권한이 없습니다.");
+        }
+
         ExamSession session = new ExamSession();
         session.setCategory(sessionRequestDTO.getCategory());
         session.setName(sessionRequestDTO.getName());
@@ -87,10 +100,10 @@ public class ExamSessionService {
             status.setExamSession(session);
             session.getStatus().add(status);
         }
+
         ExamSession savedSession = examSessionRepository.save(session);
         log.info("시험 세션 생성 완료. ID: {}", savedSession.getId());
 
-        // 반환할 데이터 생성
         return Map.of(
                 "id", savedSession.getId(),
                 "name", savedSession.getName(),
@@ -100,6 +113,8 @@ public class ExamSessionService {
                 "createdAt", LocalDateTime.now()
         );
     }
+
+
 
     private ExamSessionResponseDTO toResponseDto(ExamSession session) {
         log.debug("시험 세션 변환 중: {}", session.getId());
@@ -119,18 +134,27 @@ public class ExamSessionService {
     @Transactional
     public void deleteSessionById(HttpServletRequest request, Long sessionId) {
 
-        // Authorization 헤더에서 토큰 추출
         String authorizationHeader = request.getHeader("Authorization");
         if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
             throw new TokenInvalidException("유효하지 않은 Authorization 헤더 형식입니다.");
         }
 
-        // "Bearer " 접두사를 제거하여 순수한 JWT 토큰 추출
         String token = authorizationHeader.substring(7);
-
-        // 토큰 유효성 검증
         if (!tokenProvider.validateToken(token)) {
             throw new TokenInvalidException("유효하지 않은 토큰입니다.");
+        }
+
+        // JWT에서 이메일 추출 및 암호화
+        String email = tokenProvider.getUserIdFromToken(token);
+        String encryptedEmail = AESUtil.encrypt(email);
+
+        // 사용자 조회
+        User user = userRepository.findByEmail(encryptedEmail)
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
+
+        // 권한 확인
+        if (!user.getAuthority().equals(Authority.ROLE_INSTRUCTOR)) {
+            throw new TokenInvalidException("세션을 삭제할 권한이 없습니다.");
         }
 
         // 세션 삭제
@@ -142,14 +166,27 @@ public class ExamSessionService {
     // 특정 세션 수정
     @Transactional
     public Map<String, Object> updateSession(HttpServletRequest request, Long sessionId, ExamSessionRequestDTO sessionRequestDTO) {
-        // 토큰 검증
         String authorizationHeader = request.getHeader("Authorization");
         if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
             throw new TokenInvalidException("유효하지 않은 Authorization 헤더 형식입니다.");
         }
+
         String token = authorizationHeader.substring(7);
         if (!tokenProvider.validateToken(token)) {
             throw new TokenInvalidException("유효하지 않은 토큰입니다.");
+        }
+
+        // JWT에서 이메일 추출 및 암호화
+        String email = tokenProvider.getUserIdFromToken(token);
+        String encryptedEmail = AESUtil.encrypt(email);
+
+        // 사용자 조회
+        User user = userRepository.findByEmail(encryptedEmail)
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
+
+        // 권한 확인
+        if (!user.getAuthority().equals(Authority.ROLE_INSTRUCTOR)) {
+            throw new TokenInvalidException("세션을 수정할 권한이 없습니다.");
         }
 
         // 세션 조회 및 업데이트
