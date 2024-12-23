@@ -21,9 +21,7 @@ import com.doosan.msa.common.exception.TokenInvalidException;
 import javax.servlet.http.HttpServletRequest;
 
 /**
- * ExamSessionService 클래스
- * - 시험 세션과 관련된 비즈니스 로직을 처리하는 서비스 클래스
- * - 시험 세션 생성, 조회 등 주요 기능을 제공
+ * ExamSessionService
  */
 @Service
 @RequiredArgsConstructor
@@ -114,10 +112,7 @@ public class ExamSessionService {
         );
     }
 
-
-
     private ExamSessionResponseDTO toResponseDto(ExamSession session) {
-        log.debug("시험 세션 변환 중: {}", session.getId());
         return new ExamSessionResponseDTO(
                 session.getCategory(),
                 session.getId().toString(),
@@ -159,7 +154,7 @@ public class ExamSessionService {
 
         // 세션 삭제
         examSessionRepository.deleteById(sessionId);
-        log.info("ID가 {}인 세션이 삭제되었습니다.", sessionId);
+        log.info("ID가 {}인 세션 삭제", sessionId);
     }
 
 
@@ -207,7 +202,7 @@ public class ExamSessionService {
             session.getStatus().add(status);
         }
         examSessionRepository.save(session);
-        log.info("ID가 {}인 세션이 수정되었습니다.", sessionId);
+        log.info("ID가 {}인 세션 수정", sessionId);
 
         // 반환할 데이터 구성
         return Map.of(
