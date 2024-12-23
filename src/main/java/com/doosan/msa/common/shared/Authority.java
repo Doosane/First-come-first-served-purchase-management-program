@@ -9,7 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public enum Authority {
 
-    ROLE_USER; // 사용자 권한
+    ROLE_USER, // 학생 사용자 권한
+    ROLE_INSTRUCTOR; // 강사
 
     // Enum 클래스 초기화 시 로그 기록
     static {

@@ -1,5 +1,6 @@
 package com.doosan.msa.user.dto.responseDTO;
 
+import com.doosan.msa.common.shared.Authority;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -24,6 +25,7 @@ public class UserResponseDTO {
     private String phone; // 사용자 전화번호
     private String email; // 사용자 이메일
     private String address; // 사용자 주소
+    private Authority authority;
     private LocalDateTime createdAt; // 생성 시간
     private LocalDateTime modifiedAt; // 수정 시간
 
@@ -31,7 +33,7 @@ public class UserResponseDTO {
      * DTO 생성 시 로그 기록
      */
     public void logCreation() {
-        log.info("UserResponseDTO 생성 - ID: {}, 이름: {}, 이메일: {}, 폰: {}, 주소: {}", id, name, email, phone, address);
+        log.info("UserResponseDTO 생성 - ID: {}, 이름: {}, 이메일: {}, 폰: {}, 주소: {}, authority: {}", id, name, email, phone, address, authority);
     }
 
     /**
@@ -46,8 +48,9 @@ public class UserResponseDTO {
                 ", phone='" + phone + '\'' +
                 ", email='" + email + '\'' +
                 ", address='" + address + '\'' +
-                ", createdAt=" + createdAt +
-                ", modifiedAt=" + modifiedAt +
+                ", authority=" + authority + '\'' +
+                ", createdAt=" + createdAt + '\'' +
+                ", modifiedAt=" + modifiedAt + '\'' +
                 '}';
     }
 }
